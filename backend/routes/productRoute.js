@@ -14,7 +14,7 @@ const {
   addProduct,
   getSettings,
 } = require("../controllers/productController");
-const { getUrllist, plans, updateUrls, updatePlans, deleteUrl } = require("../controllers/url_controller");
+const { getUrllist, plans, updateUrls, updatePlans, deleteUrl, deletePlan, getPlanById, singlePlan, updatePlan, getAllStreamUrls } = require("../controllers/url_controller");
 const { isAuthenticatedUser, authorizeRoles } = require("../middleware/auth");
 
 const router = express.Router();
@@ -46,9 +46,10 @@ router
 router.route("/admin/urls").get(getUrllist);
 
 router.route("/admin/plans").get(plans);
+router.route("/admin/streamurls").get(getAllStreamUrls);
 
 router.route("/admin/updateurl/:id").put(updateUrls).delete(deleteUrl);
-router.route("/admin/updateplan/:id").put(updatePlans);
+router.route("/admin/updateplan/:id").get(getPlanById).put(updatePlan).delete(deletePlan);
 
 
 module.exports = router;

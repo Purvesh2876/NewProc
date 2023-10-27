@@ -4,6 +4,24 @@ const url_list = require("../models/url_list");
 const CVRPlan = require("../models/CVRPlan");
 const crypto = require("crypto");
 const ApiFeatures = require("../utils/apifeatures");
+const mongoose = require('mongoose');
+
+
+exports.getAllStreamUrls = async (req, res, next) => {
+    try {
+      const streamUrls = await url_list.find({}, 'streamurl'); // Fetch all stream URLs from url_list collection
+      res.status(200).json({
+        success: true,
+        streamUrls: streamUrls
+      });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({
+        success: false,
+        error: 'Internal Server Error'
+      });
+    }
+  };
 
 
 exports.getUrllist = catchAsyncErrors(async (req, res, next) => {
@@ -32,22 +50,6 @@ exports.deleteUrl = catchAsyncErrors(async (req, res, next) => {
     });
 });
 
-// exports.updateUrls = catchAsyncErrors(async (req, res, next) => {
-
-//     const streamurl = req.body.streamurl;
-
-//     const streamurls = url_list.findById(req.params.id);
-
-//     streamurls.streamurl = streamurl;
-
-//     await streamurls.save();
-
-//     res.status(200).json({
-//         success: true,
-//         streamurls,
-//     });
-// });
-
 exports.updateUrls = catchAsyncErrors(async (req, res, next) => {
     const { streamurl } = req.body;
     const urlId = req.params.id;
@@ -67,70 +69,200 @@ exports.updateUrls = catchAsyncErrors(async (req, res, next) => {
 
 
 exports.plans = catchAsyncErrors(async (req, res, next) => {
-    const url = await CVRPlan.find();
-    let serverUrl = [];
+    try {
+        const data = await CVRPlan.aggregate([
+            {
+                $lookup: {
+                    from: 'url_list', // The name of the collection to perform the join with
+                    localField: 'Serverid', // Field from CVRPlan collection
+                    foreignField: 'id', // Field from url_list collection
+                    as: 'urlDetails' // Name of the new field to store the joined data
+                }
+            },
+            {
+                $unwind: {
+                    path: '$urlDetails',
+                    preserveNullAndEmptyArrays: true // Include plans with no matching streamurl in url_list
+                }
+            },
+            {
+                $project: {
+                    plan: '$plan_name', // Rename fields if necessary
+                    plandays: '$plandays',
+                    streamurl: {
+                        $cond: {
+                            if: { $eq: ['$urlDetails', null] }, // Check if urlDetails is null (no matching streamurl)
+                            then: '', // Set streamurl to an empty string
+                            else: '$urlDetails.streamurl' // Use the streamurl from urlDetails
+                        }
+                    }
+                }
+            }
+        ]);
 
-    for (let i = 0; i < url.length; i++) {
-        let serverId = url[i].Serverid;
-        let urllists = await url_list.find({ id: serverId });
-        let urllist = urllists[0].streamurl;
-        let plan = url[i].plan_name;
-        let plandays = url[i].plandays;
-
-        let data = {
-            plan,
-            plandays,
-            urllist
-        }
-        serverUrl.push(data);
+        res.status(200).json({
+            success: true,
+            serverUrl: data
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal Server Error'
+        });
     }
-
-
-    res.status(200).json({
-        success: true,
-        serverUrl,
-    });
 });
 
-// exports.plans = catchAsyncErrors(async (req, res, next) => {
-//     const url = await CVRPlan.find();
-//     const serverUrls = await url_list.find({ id: url.map(item => item.Serverid) });
 
-//     const streamUrls = serverUrls.map(server => server.streamurl);
+exports.getPlanById = catchAsyncErrors(async (req, res, next) => {
+    const planId = req.params.id; // Extract the plan ID from the request parameters
 
-//     url.forEach((item, index) => {
-//         item.streamurl = streamUrls[index];
-//     });
+    try {
+        // Find the CVRPlan document by ID
+        const plan = await CVRPlan.findById(planId).exec();
 
-//     res.status(200).json({
-//         success: true,
-//         url,
-//         url: streamUrls, // Send the extracted "streamurl" values
-//     });
+        if (!plan) {
+            // If the document with the provided ID is not found
+            return next(new ErrorHander("Plan not found", 404));
+        }
+
+        // Now, retrieve the 'streamurl' from the 'url_list' collection
+        const streamurl = await url_list.findOne({ id: plan.Serverid }).select('streamurl').exec();
+
+        // Send the retrieved plan fields and streamurl in the response
+        res.status(200).json({
+            success: true,
+            plan: {
+                _id: plan._id,
+                // Include all CVRPlan fields here
+                plan_name: plan.plan_name,
+                plandays: plan.plandays,
+                // ... include other fields as needed
+                streamurl: streamurl ? streamurl.streamurl : null // Use streamurl if found, or null if not found
+            }
+        });
+    } catch (error) {
+        // Handle errors, e.g., validation errors
+        next(error); // Pass the error to the error-handling middleware
+    }
+});
+
+
+// 2nd for plan_name, plandays and streamurl
+
+
+
+// exports.updatePlans = catchAsyncErrors(async (req, res, next) => {
+//     const { plan_name, plandays, streamurl } = req.body; // Destructure plan_name, plandays, and streamurl from the request body
+//     const planId = req.params.id; // Extract the plan ID from the request parameters
+
+//     try {
+//         // Find the CVRPlan document by ID and update plan_name, plandays, and streamurl properties
+//         const updatedPlan = await CVRPlan.findByIdAndUpdate(
+//             planId,
+//             { plan_name, plandays, streamurl }, // Update plan_name, plandays, and streamurl properties
+//             { new: true, runValidators: true } // Options: new returns the modified document, runValidators ensures validation is performed
+//         );
+
+//         if (!updatedPlan) {
+//             // If the document with the provided ID is not found
+//             return next(new ErrorHander("Plan not found", 404));
+//         }
+
+//         // Send the updated plan in the response
+//         res.status(200).json({
+//             success: true,
+//             plan: updatedPlan,
+//         });
+//     } catch (error) {
+//         // Handle errors, e.g., validation errors
+//         next(error); // Pass the error to the error-handling middleware
+//     }
+// });
+
+exports.updatePlan = catchAsyncErrors(async (req, res, next) => {
+    const planId = req.params.id; // Extract the plan ID from the request parameters
+    const { plan_name, plandays, streamurl } = req.body; // Extract updated fields from the request body
+
+    try {
+        // Update CVRPlan document by ID
+        const updatedPlan = await CVRPlan.findByIdAndUpdate(planId, { plan_name, plandays }, { new: true }).exec();
+
+        if (!updatedPlan) {
+            // If the document with the provided ID is not found
+            return next(new ErrorHander("Plan not found", 404));
+        }
+
+        // Update streamurl in url_list collection based on planId
+        const updatedStreamUrl = await url_list.findOneAndUpdate(
+            { id: updatedPlan.Serverid },
+            { streamurl },
+            { new: true }
+        ).exec();
+
+        // Send the updated plan and streamurl in the response
+        res.status(200).json({
+            success: true,
+            plan: {
+                _id: updatedPlan._id,
+                plan_name: updatedPlan.plan_name,
+                plandays: updatedPlan.plandays,
+                streamurl: updatedStreamUrl ? updatedStreamUrl.streamurl : null
+            }
+        });
+    } catch (error) {
+        // Handle errors, e.g., validation errors
+        next(error); // Pass the error to the error-handling middleware
+    }
+});
+
+
+
+
+
+// exports.updatePlans = catchAsyncErrors(async (req, res, next) => {
+//     const { plan_name, plandays, streamurl } = req.body; // Destructure plan_name, plandays, and streamurl from the request body
+//     const planId = req.params.id; // Extract the plan ID from the request parameters
+
+//     try {
+//         // Find the CVRPlan document by ID and update the plan_name, plandays, and streamurl properties
+//         const updatedPlan = await CVRPlan.findByIdAndUpdate(
+//             planId,
+//             { plan_name, plandays, streamurl }, // Update plan_name, plandays, and streamurl properties
+//             { new: true, runValidators: true } // Options: new returns the modified document, runValidators ensures validation is performed
+//         );
+
+//         if (!updatedPlan) {
+//             // If the document with the provided ID is not found
+//             return next(new ErrorHander("Plan not found", 404));
+//         }
+
+//         // Send the updated plan in the response
+//         res.status(200).json({
+//             success: true,
+//             plan: updatedPlan,
+//         });
+//     } catch (error) {
+//         // Handle errors, e.g., validation errors
+//         next(error); // Pass the error to the error-handling middleware
+//     }
 // });
 
 
+exports.deletePlan = catchAsyncErrors(async (req, res, next) => {
+    const planId = req.params.id;
 
-exports.updatePlans = catchAsyncErrors(async (req, res, next) => {
+    // Find the URL by ID and remove it
+    const plan = await CVRPlan.findById(planId);
 
-    const plan_name = req.body.plan_name;
-    const plandetail = req.body.plandetail;
-    const plandays = req.body.plandays;
-    const isenable = req.body.isenable;
-    const price = req.body.price;
+    if (!plan) {
+        return next(new ErrorHander('URL not found', 404));
+    }
 
-    const plans = CVRPlan.findById(req.params.id);
-
-    plans.plan_name = plan_name;
-    plans.plandetail = plandetail;
-    plans.plandays = plandays;
-    plans.isenable = isenable;
-    plans.price = price;
-
-    await plans.save();
+    await plan.remove();
 
     res.status(200).json({
         success: true,
-        plans,
+        message: 'URL deleted successfully',
     });
 });
